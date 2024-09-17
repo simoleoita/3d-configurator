@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>3D Shapes Configurator</title>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background: transparent; /* Transparent background */
+            font-family: Arial, sans-serif;
+            height: 100%;
+            width: 100%;
+            display: flex;
+        }
+        #controls {
+            position: absolute;
+            right: 20px;
+            top: 20px;
+            background: rgba(255, 255, 255, 0.8);
+            padding: 15px;
+            border-radius: 8px;
+            max-width: 300px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.3);
+            overflow-y: auto;
+            max-height: 90vh;
+        }
+        #controls h2 {
+            margin-top: 0;
+            font-size: 18px;
+        }
+        .control-group {
+            margin-bottom: 15px;
+        }
+        .control-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-size: 14px;
+        }
+        .control-group select, .control-group input[type="range"] {
+            width: 100%;
+        }
+        /* Optional: Add scrollbar styling if needed */
+        #controls::-webkit-scrollbar {
+            width: 8px;
+        }
+        #controls::-webkit-scrollbar-track {
+            background: rgba(0,0,0,0.1);
+            border-radius: 4px;
+        }
+        #controls::-webkit-scrollbar-thumb {
+            background: rgba(0,0,0,0.3);
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body>
+    <!-- 3D Canvas -->
+    <canvas id="threeCanvas"></canvas>
+
+    <!-- Control Panel -->
+    <div id="controls">
+        <h2>3D Configurator</h2>
+
+        <!-- Platonic Solid Selection -->
+        <div class="control-group">
+            <label for="solidType">Platonic Solid:</label>
+            <select id="solidType">
+                <option value="tetrahedron">Tetrahedron</option>
+                <option value="cube" selected>Cube</option>
+                <option value="octahedron">Octahedron</option>
+                <option value="dodecahedron">Dodecahedron</option>
+                <option value="icosahedron">Icosahedron</option>
+            </select>
+        </div>
+
+        <!-- View Mode Selection -->
+        <div class="control-group">
+            <label for="viewMode">View Mode:</label>
+            <select id="viewMode">
+                <option value="solid" selected>Solid</option>
+                <option value="wireframe">Wireframe</option>
+            </select>
+        </div>
+
+        <!-- Dual Meshing Toggle -->
+        <div class="control-group">
+            <label for="dualMesh">Dual Meshing:</label>
+            <select id="dualMesh">
+                <option value="none" selected>None</option>
+                <option value="dual">Dual</option>
+            </select>
+        </div>
+
+        <!-- Voronoi Deconstruction Toggle -->
+        <div class="control-group">
+            <label for="voronoi">Voronoi Deconstruction:</label>
+            <select id="voronoi">
+                <option value="none" selected>None</option>
+                <option value="voronoi">Apply</option>
+            </select>
+        </div>
+
+        <!-- Shader Selection -->
+        <div class="control-group">
+            <label for="shader">Shader:</label>
+            <select id="shader">
+                <option value="clay">Clay</option>
+                <option value="neutral" selected>Neutral</option>
+                <option value="polished">Polished/Reflective</option>
+            </select>
+        </div>
+
+        <!-- Voronoi Detail Slider -->
+        <div class="control-group" id="voronoiDetailGroup" style="display: none;">
+            <label for="voronoiDetail">Voronoi Detail:</label>
+            <input type="range" id="voronoiDetail" min="1" max="10" value="5">
+        </div>
+
+        <!-- Dual Meshing Detail Slider -->
+        <div class="control-group" id="dualMeshDetailGroup" style="display: none;">
+            <label for="dualMeshDetail">Dual Mesh Detail:</label>
+            <input type="range" id="dualMeshDetail" min="1" max="10" value="5">
+        </div>
+    </div>
+
+    <!-- Three.js Library -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r136/three.min.js"></script>
+    <!-- OrbitControls (optional for user interaction) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r136/examples/js/controls/OrbitControls.js"></script>
+
+    <script>
+        // Scene, Camera, Renderer
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(0, 0, 15);
+
+        const renderer = new THREE.WebGLRenderer({ canvas: document.getElementById('threeCanvas'), alpha: true, antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setClearColor(0x000000, 0); // Transparent background
+
+        // Optional: OrbitControls for debugging (can be removed for final version)
+        // const controls = new THREE.OrbitControls(camera, renderer.domElement);
+        // controls.enableDamping = true;
+
+        // Lights
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+        scene.add(ambientLight);
+
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        directionalLight.position.set(10, 10, 10);
+        scene.add(directionalLight);
+
+        // Geometry Variables
+        let currentGeometry = new THREE.BoxGeometry(5, 5, 5);
+        let dualGeometry = null;
+        let voronoiGeometry = null;
+
+        // Material Variables
+        let clayMaterial = new THREE.MeshStandardMaterial({ color: 0x8B4513, metalness: 0.1, roughness: 0.8 });
+        let neutralMaterial = new THREE.MeshStandardMaterial({ color: 0x808080, metalness: 0.5, roughness: 0.5 });
+        let polishedMaterial = new THREE.MeshStandardMaterial({ color: 0xffffff, metalness: 1, roughness: 0.1 });
+
+        let currentMaterial = neutralMaterial;
+
+        // Mesh
+        let mesh = new THREE.Mesh(currentGeometry, currentMaterial);
+        scene.add(mesh);
+
+        // Auto-Rotation
+        function animate() {
+            requestAnimationFrame(animate);
+
+            // Rotate around Z-axis
+            mesh.rotation.z += 0.005;
+
+            // controls.update(); // Uncomment if using OrbitControls
+            renderer.render(scene, camera);
+        }
+        animate();
+
+        // Handle Window Resize
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        // Control Elements
+        const solidType = document.getElementById('solidType');
+        const viewMode = document.getElementById('viewMode');
+        const dualMesh = document.getElementById('dualMesh');
+        const voronoi = document.getElementById('voronoi');
+        const shader = document.getElementById('shader');
+        const voronoiDetail = document.getElementById('voronoiDetail');
+        const dualMeshDetail = document.getElementById('dualMeshDetail');
+        const voronoiDetailGroup = document.getElementById('voronoiDetailGroup');
+        const dualMeshDetailGroup = document.getElementById('dualMeshDetailGroup');
+
+        // Function to Update Geometry
+        function updateGeometry() {
+            // Remove existing mesh
+            scene.remove(mesh);
+            mesh.geometry.dispose();
+
+            // Select Geometry Based on Solid Type
+            switch (solidType.value) {
+                case 'tetrahedron':
+                    currentGeometry = new THREE.TetrahedronGeometry(5);
+                    break;
+                case 'cube':
+                    currentGeometry = new THREE.BoxGeometry(5, 5, 5);
+                    break;
+                case 'octahedron':
+                    currentGeometry = new THREE.OctahedronGeometry(5);
+                    break;
+                case 'dodecahedron':
+                    currentGeometry = new THREE.DodecahedronGeometry(5);
+                    break;
+                case 'icosahedron':
+                    currentGeometry = new THREE.IcosahedronGeometry(5);
+                    break;
+                default:
+                    currentGeometry = new THREE.BoxGeometry(5, 5, 5);
+            }
+
+            // Apply Dual Mesh if Selected
+            if (dualMesh.value === 'dual') {
+                dualGeometry = createDualGeometry(currentGeometry);
+                currentGeometry = dualGeometry;
+            }
+
+            // Create New Mesh
+            mesh = new THREE.Mesh(currentGeometry, currentMaterial);
+
+            // Apply Voronoi Deconstruction if Selected
+            if (voronoi.value === 'voronoi') {
+                applyVoronoiDeconstruction();
+            }
+
+            // Apply View Mode
+            applyViewMode();
+
+            // Add to Scene
+            scene.add(mesh);
+        }
+
+        // Function to Create Dual Geometry
+        function createDualGeometry(geometry) {
+            // Placeholder for Dual Geometry Creation
+            // Three.js doesn't provide dual geometries out-of-the-box.
+            // Implementing dual geometries requires complex algorithms.
+            // For simplicity, this function returns the original geometry.
+            // You can integrate a library or implement your own dual geometry logic here.
+
+            // Returning the original geometry for now
+            return geometry.clone();
+        }
+
+        // Function to Apply View Mode
+        function applyViewMode() {
+            if (viewMode.value === 'wireframe') {
+                mesh.material.wireframe = true;
+            } else {
+                mesh.material.wireframe = false;
+            }
+        }
+
+        // Function to Apply Voronoi Deconstruction
+        function applyVoronoiDeconstruction() {
+            // Simple Voronoi-like Deformation using Noise
+            // For a more accurate Voronoi, shaders or additional geometry processing is needed
+            const noise = new THREE.PerlinNoise();
+            const positions = mesh.geometry.attributes.position;
+            const vertex = new THREE.Vector3();
+
+            for (let i = 0; i < positions.count; i++) {
+                vertex.fromBufferAttribute(positions, i);
+                // Apply displacement based on position
+                const displacement = noise.noise(vertex.x * 0.2, vertex.y * 0.2, vertex.z * 0.2) * 0.5;
+                vertex.normalize().multiplyScalar(5 + displacement);
+                positions.setXYZ(i, vertex.x, vertex.y, vertex.z);
+            }
+
+            positions.needsUpdate = true;
+            mesh.geometry.computeVertexNormals();
+        }
+
+        // Function to Update Material
+        function updateMaterial() {
+            switch (shader.value) {
+                case 'clay':
+                    currentMaterial = clayMaterial;
+                    break;
+                case 'neutral':
+                    currentMaterial = neutralMaterial;
+                    break;
+                case 'polished':
+                    currentMaterial = polishedMaterial;
+                    break;
+                default:
+                    currentMaterial = neutralMaterial;
+            }
+
+            mesh.material = currentMaterial;
+        }
+
+        // Event Listeners for Controls
+        solidType.addEventListener('change', updateGeometry);
+        viewMode.addEventListener('change', applyViewMode);
+        dualMesh.addEventListener('change', () => {
+            if (dualMesh.value === 'dual') {
+                dualMeshDetailGroup.style.display = 'block';
+            } else {
+                dualMeshDetailGroup.style.display = 'none';
+            }
+            updateGeometry();
+        });
+        voronoi.addEventListener('change', () => {
+            if (voronoi.value === 'voronoi') {
+                voronoiDetailGroup.style.display = 'block';
+            } else {
+                voronoiDetailGroup.style.display = 'none';
+            }
+            updateGeometry();
+        });
+        shader.addEventListener('change', updateMaterial);
+
+        // Voronoi Detail Slider Event
+        voronoiDetail.addEventListener('input', () => {
+            if (voronoi.value === 'voronoi') {
+                applyVoronoiDeconstruction();
+            }
+        });
+
+        // Dual Mesh Detail Slider Event
+        dualMeshDetail.addEventListener('input', () => {
+            if (dualMesh.value === 'dual') {
+                // Implement dual mesh detail adjustments here
+                // Placeholder: Currently not altering the geometry
+                updateGeometry();
+            }
+        });
+
+        // Initial Setup
+        updateGeometry();
+        updateMaterial();
+
+        // Placeholder Perlin Noise Function
+        // Since Three.js doesn't include Perlin Noise, we'll implement a simple one
+        // For production, consider using a robust noise library or integrating with a shader
+
+        THREE.PerlinNoise = function() {
+            // Simple Perlin Noise implementation
+            // Reference: https://github.com/mrdoob/three.js/blob/master/examples/jsm/math/ImprovedNoise.js
+            function fade(t) {
+                return t * t * t * (t * (t * 6 - 15) + 10);
+            }
+
+            function lerp(t, a, b) {
+                return a + t * (b - a);
+            }
+
+            function grad(hash, x, y, z) {
+                const h = hash & 15;
+                const u = h < 8 ? x : y;
+                const v = h < 4 ? y : (h === 12 || h === 14 ? x : z);
+                return ((h & 1) === 0 ? u : -u) + ((h & 2) === 0 ? v : -v);
+            }
+
+            const p = new Array(256);
+            for (let i = 0; i < 256; i++) {
+                p[i] = Math.floor(Math.random() * 256);
+            }
+            // To remove the need for index wrapping, double the permutation table
+            const perm = new Array(512);
+            const gradP = new Array(512);
+            for(let i=0; i < 512; i++) {
+                perm[i] = p[i & 255];
+                gradP[i] = grad(perm[i], 0, 0, 0);
+            }
+
+            this.noise = function(x, y, z) {
+                const X = Math.floor(x) & 255;
+                const Y = Math.floor(y) & 255;
+                const Z = Math.floor(z) & 255;
+
+                x -= Math.floor(x);
+                y -= Math.floor(y);
+                z -= Math.floor(z);
+
+                const u = fade(x);
+                const v = fade(y);
+                const w = fade(z);
+
+                const A = perm[X] + Y;
+                const AA = perm[A] + Z;
+                const AB = perm[A + 1] + Z;
+                const B = perm[X + 1] + Y;
+                const BA = perm[B] + Z;
+                const BB = perm[B + 1] + Z;
+
+                return lerp(w, lerp(v, lerp(u, gradP[AA], gradP[BA]),
+                                     lerp(u, gradP[AB], gradP[BB])),
+                             lerp(v, lerp(u, gradP[AA + 1], gradP[BA + 1]),
+                                     lerp(u, gradP[AB + 1], gradP[BB + 1])));
+            };
+        };
+    </script>
+</body>
+</html>
